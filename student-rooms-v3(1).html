@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>غرف النقاش للطلاب</title>
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mqtt@5.10.1/dist/mqtt.min.js"></script>
+<style>
+:root{--bg:#f6f7fb;--card:#fff;--tx:#1b2030;--mu:#667;--pr:#2f6fed;--ok:#1f9d55;--bad:#d64545;--bd:#e1e5ee;--me:#e4edff}
+@media (prefers-color-scheme:dark){:root{color-scheme:dark;--bg:#12151c;--card:#1b2030;--tx:#e8ebf4;--mu:#9aa3b8;--pr:#6b9bff;--ok:#43c47a;--bad:#ff7a7a;--bd:#2c3347;--me:#26355c}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font-family:"Segoe UI",Tahoma,Arial,sans-serif;line-height:1.6}
+.w{max-width:960px;margin:0 auto;padding:16px}
+h1{font-size:1.4rem;margin:.2rem 0}
+p.s{color:var(--mu);margin:.2rem 0 1rem}
+.g{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px}
+.c{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:14px}
+.c h3{margin:0 0 8px;font-size:1.05rem}
+button{font:inherit;cursor:pointer;border:0;border-radius:10px;padding:8px 14px;background:var(--pr);color:#fff}
+button.o{background:transparent;color:var(--pr);border:1px solid var(--pr)}
+button.d{background:var(--bad)}
+button:disabled{opacity:.5;cursor:not-allowed}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+input{font:inherit;padding:9px 12px;border-radius:10px;border:1px solid var(--bd);background:var(--card);color:var(--tx);min-width:0}
+.nm{display:flex;gap:8px;margin-bottom:14px}.nm input{flex:1}
+.note{background:var(--card);border:1px dashed var(--bd);border-radius:12px;padding:10px 14px;color:var(--mu);margin-bottom:12px}
+.big{text-align:center;padding:40px 16px}.big .e{font-size:3rem}
+.rm{display:grid;grid-template-columns:230px 1fr;gap:12px}
+@media(max-width:700px){.rm{grid-template-columns:1fr}}
+.pl{list-style:none;margin:0;padding:0}
+.pl li{padding:6px 0;border-bottom:1px solid var(--bd);display:flex;justify-content:space-between;gap:6px}
+.ch{display:flex;flex-direction:column;height:60vh;min-height:320px}
+.ms{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding:4px 0}
+.m{background:var(--bg);border-radius:10px;padding:6px 10px;max-width:85%;align-self:flex-start;overflow-wrap:anywhere}
+.m.me{background:var(--me);align-self:flex-end}
+.m b{font-size:.8rem;color:var(--mu);display:block}
+.m.sy{align-self:center;background:transparent;color:var(--mu);font-size:.85rem}
+.cm{display:flex;gap:8px;margin-top:8px}.cm input{flex:1}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div class="w">
+ <div id="v-lobby">
+  <h1>🏫 غرف النقاش</h1>
+  <p class="s">كل غرفة تتسع لـ 5 طلاب فقط. اكتب اسمك ثم اختر غرفتك، أو افتح الرابط الذي أرسله لك المعلم.</p>
+  <div class="nm"><input id="nick" maxlength="24" placeholder="اكتب اسمك هنا"></div>
+  <div class="g" id="grid"></div>
+ </div>
+ <div id="v-wait" class="c big" hidden><div class="e">⏳</div><h2>جاري الدخول إلى الغرفة...</h2></div>
+ <div id="v-full" class="c big" hidden><div class="e">🚫</div><h2>الغرفة ممتلئة</h2><p class="s">اكتمل عدد الطلاب في هذه الغرفة (5 طلاب). اختر غرفة أخرى أو اسأل معلمك.</p><button id="bk">العودة إلى الغرف</button></div>
+ <div id="v-err" class="c big" hidden><div class="e">⚠️</div><h2>تعذّر الاتصال</h2><p class="s">تأكد من الإنترنت وأعد المحاولة بعد قليل.</p><button id="bk3">العودة</button></div>
+ <div id="v-name" class="c big" hidden><div class="e">👋</div><h2 id="nt"></h2><div class="row" style="justify-content:center"><input id="nick2" maxlength="24" placeholder="اكتب اسمك"><button id="go">دخول</button></div></div>
+ <div id="v-room" hidden>
+  <div class="row" style="justify-content:space-between;margin-bottom:10px">
+   <h1 id="rt"></h1>
+   <div class="row"><button id="mic" class="o">🎤 تشغيل الميكروفون</button><button id="lv" class="d">خروج</button></div>
+  </div>
+  <div id="mnote" class="note" hidden></div>
+  <div class="rm">
+   <div class="c"><h3>الموجودون في الغرفة</h3><ul class="pl" id="pl"></ul></div>
+   <div class="c ch"><div class="ms" id="ms"></div>
+    <div class="cm"><input id="tx" maxlength="500" placeholder="اكتب رسالتك..."><button id="snd">إرسال</button></div></div>
+  </div>
+  <div id="audios" hidden></div>
+ </div>
+</div>
+<script>
+/* ===== إعدادات يمكنك تعديلها ===== */
+const CLASS_CODE="myclass2026";  // غيّره إلى كلمة خاصة بصفك (حروف إنجليزية وأرقام فقط)
+const ROOMS=5;                   // عدد الغرف
+const CAP=5;                     // عدد الطلاب في كل غرفة
+// خوادم الصوت (TURN). لكي يعمل الصوت على كل الشبكات أنشئ حسابا مجانيا في metered.ca
+// ثم ضع اسم تطبيقك ومفتاح API هنا. مثال: METERED_APP="myschool"  و  METERED_KEY="abc123..."
+const METERED_APP="";
+const METERED_KEY="";
+let ICE=[
+ {urls:"stun:stun.l.google.com:19302"},
+ {urls:"stun:global.stun.twilio.com:3478"},
+ {urls:"stun:stun.relay.metered.ca:80"},
+ {urls:["turn:global.relay.metered.ca:80","turn:global.relay.metered.ca:80?transport=tcp","turn:global.relay.metered.ca:443","turns:global.relay.metered.ca:443?transport=tcp"],username:"1419d8da49e3ddc956b552df",credential:"epdY+aNkt1KUUK4J"},
+ {urls:["turn:standard.relay.metered.ca:80","turn:standard.relay.metered.ca:80?transport=tcp","turn:standard.relay.metered.ca:443","turns:standard.relay.metered.ca:443?transport=tcp"],username:"1419d8da49e3ddc956b552df",credential:"epdY+aNkt1KUUK4J"}
+];
+// خوادم الدردشة والأسماء (عامة ومجانية)، يُجرَّب الأول ثم الذي بعده
+const BROKERS=["wss://broker.emqx.io:8084/mqtt","wss://broker.hivemq.com:8884/mqtt"];
+/* ================================== */
+let PCFG={config:{iceServers:ICE}};
+const iceReady=(async()=>{
+ if(!METERED_APP||!METERED_KEY)return;
+ try{
+  const r=await fetch("https://"+METERED_APP+".metered.live/api/v1/turn/credentials?apiKey="+METERED_KEY);
+  const j=await r.json();
+  if(Array.isArray(j)&&j.length){ICE=[{urls:"stun:stun.l.google.com:19302"}].concat(j);PCFG={config:{iceServers:ICE}};}
+ }catch(e){}
+})();
+const $=id=>document.getElementById(id);
+const code=((new URLSearchParams(location.search).get("c"))||CLASS_CODE).toLowerCase().replace(/[^a-z0-9]/g,"")||"class";
+const PFX="stdrm"+code+"-",BASE="stdrm/"+code+"/";
+const SID=Math.random().toString(36).slice(2);
+const pid=(n,k)=>PFX+"r"+n+"-s"+k;
+const slotOf=id=>+id.split("-s").pop();
+let name="",room=null,micStream=null,baseStream=null,ac=null;
+try{name=localStorage.getItem("nick")||"";}catch(e){}
+$("nick").value=name;
+function show(v){["lobby","wait","full","err","name","room"].forEach(k=>$("v-"+k).hidden=(k!==v));}
+function setName(v){name=(v||"").trim().slice(0,24);try{localStorage.setItem("nick",name);}catch(e){}}
+function hashRoom(){const m=/^#room-(\d+)$/.exec(location.hash);const n=m?+m[1]:0;return n>=1&&n<=ROOMS?n:0;}
+
+/* ---------- الاتصال بخادم الدردشة (MQTT) ---------- */
+function mqttConnect(extra){
+ return new Promise((res,rej)=>{
+  let i=0;
+  const next=()=>{
+   if(i>=BROKERS.length){rej(new Error("no broker"));return;}
+   const c=mqtt.connect(BROKERS[i++],Object.assign({clientId:"sr_"+Math.random().toString(16).slice(2,12),clean:true,connectTimeout:6000,reconnectPeriod:3000,keepalive:20},extra||{}));
+   let done=false;
+   const fail=()=>{if(done)return;done=true;try{c.end(true);}catch(e){}next();};
+   c.once("connect",()=>{if(done)return;done=true;c.removeListener("error",fail);c.on("error",()=>{});res(c);});
+   c.once("error",fail);
+   setTimeout(fail,7000);
+  };
+  next();
+ });
+}
+
+/* ---------- الصفحة الرئيسية: أسماء الموجودين في كل غرفة ---------- */
+let lobbyNames={},lc=null,lobbyBusy=false,lobbyTimer=null,lobbyRender=null;
+function renderLobby(){
+ const g=$("grid");g.textContent="";
+ for(let i=1;i<=ROOMS;i++){
+  const o=lobbyNames[i]||{};
+  const ns=Object.keys(o).sort((a,b)=>a-b).map(k=>o[k].n),full=ns.length>=CAP;
+  const c=document.createElement("div");c.className="c";
+  const h=document.createElement("h3");h.textContent="الغرفة "+i;
+  const ul=document.createElement("ul");ul.className="pl";ul.style.marginBottom="10px";
+  if(!ns.length){const li=document.createElement("li");li.style.color="var(--mu)";li.textContent="لا أحد بالداخل";ul.appendChild(li);}
+  ns.forEach(n=>{const li=document.createElement("li");li.textContent="👤 "+n;ul.appendChild(li);});
+  const r=document.createElement("div");r.className="row";
+  const e=document.createElement("button");e.textContent=full?"الغرفة ممتلئة":"دخول";e.disabled=full;
+  e.onclick=()=>{const v=$("nick").value.trim();if(!v){$("nick").focus();return;}setName(v);location.hash="room-"+i;};
+  const l=document.createElement("button");l.className="o";l.textContent="نسخ الرابط";
+  l.onclick=async()=>{const t=location.href.split("#")[0]+"#room-"+i;try{await navigator.clipboard.writeText(t);l.textContent="تم النسخ ✓";setTimeout(()=>l.textContent="نسخ الرابط",1500);}catch(x){prompt("انسخ الرابط:",t);}};
+  r.append(e,l);c.append(h,ul,r);g.appendChild(c);
+ }
+}
+function softRender(){clearTimeout(lobbyRender);lobbyRender=setTimeout(()=>{if(!room&&!hashRoom())renderLobby();},250);}
+async function startLobby(){
+ if(lc||lobbyBusy||typeof mqtt==="undefined")return;lobbyBusy=true;
+ try{
+  const c=await mqttConnect();
+  if(room||hashRoom()){c.end(true);return;}
+  lc=c;
+  c.on("message",(t,p)=>{
+   const m=/r(\d+)\/p\/(\d+)$/.exec(t);if(!m)return;const n=+m[1],k=+m[2],s=p.toString();
+   if(!s){if(lobbyNames[n]){delete lobbyNames[n][k];}}
+   else{try{const d=JSON.parse(s);(lobbyNames[n]=lobbyNames[n]||{})[k]={n:String(d.n||"طالب").slice(0,24),seen:Date.now()};}catch(e){return;}}
+   softRender();
+  });
+  c.subscribe(BASE+"+/p/+");
+  lobbyTimer=setInterval(()=>{const now=Date.now();Object.keys(lobbyNames).forEach(n=>Object.keys(lobbyNames[n]).forEach(k=>{if(now-lobbyNames[n][k].seen>70000)delete lobbyNames[n][k];}));softRender();},10000);
+ }catch(e){}finally{lobbyBusy=false;}
+}
+function stopLobby(){clearInterval(lobbyTimer);if(lc){try{lc.end(true);}catch(e){}lc=null;}lobbyNames={};}
+
+/* ---------- التنقل ---------- */
+function route(){
+ const n=hashRoom();
+ if(room&&(!n||n!==room.n))leave(true);
+ if(!n){show("lobby");renderLobby();startLobby();return;}
+ stopLobby();
+ if(room)return;
+ if(name)enter(n);else{$("nt").textContent="مرحبا بك في الغرفة "+n;$("nick2").value="";show("name");}
+}
+window.addEventListener("hashchange",route);
+$("go").onclick=()=>{const v=$("nick2").value.trim();if(!v){$("nick2").focus();return;}setName(v);$("nick").value=name;route();};
+$("bk").onclick=$("bk3").onclick=()=>{location.hash="";route();};
+
+/* ---------- حجز مقعد (الحد الأقصى 5): الخادم يمنع تكرار المقعد ---------- */
+function tryId(id){
+ return new Promise(res=>{
+  const p=new Peer(id,PCFG);let done=false;
+  p.on("open",()=>{done=true;res({ok:true,peer:p});});
+  p.on("error",e=>{if(done)return;done=true;try{p.destroy();}catch(x){}res({ok:false,err:e.type==="unavailable-id"?"taken":"other"});});
+  setTimeout(()=>{if(!done){done=true;try{p.destroy();}catch(x){}res({ok:false,err:"other"});}},12000);
+ });
+}
+function outStream(){return micStream||baseStream;}
+function micOn(){return !!(micStream&&micStream.getAudioTracks()[0].enabled);}
+
+async function enter(n){
+ show("wait");
+ await iceReady;
+ const me=room={n,slot:0,peer:null,rc:null,pt:"",members:{},calls:{},callTry:{},seen:{},timer:null,hb:null,voiceFail:0};
+ try{ac=ac||new (window.AudioContext||window.webkitAudioContext)();ac.resume&&ac.resume();baseStream=ac.createMediaStreamDestination().stream;}catch(e){baseStream=new MediaStream();}
+ for(let k=1;k<=CAP;k++){
+  const r=await tryId(pid(n,k));
+  if(room!==me){if(r.ok)r.peer.destroy();return;}
+  if(r.ok){me.peer=r.peer;me.slot=k;break;}
+  if(r.err!=="taken"){fail(me);return;}
+ }
+ if(!me.slot){room=null;show("full");return;}
+ const p=me.peer;
+ p.on("call",call=>{call.answer(outStream());setupCall(call);});
+ p.on("disconnected",()=>{try{p.reconnect();}catch(e){}});
+ p.on("error",()=>{});
+ me.pt=BASE+"r"+n+"/p/"+me.slot;
+ try{me.rc=await mqttConnect({will:{topic:me.pt,payload:"",qos:1,retain:true}});}catch(e){fail(me);return;}
+ if(room!==me){try{me.rc.end(true);}catch(e){}return;}
+ const c=me.rc;
+ c.on("message",onMsg);
+ c.on("connect",pub);
+ c.subscribe([BASE+"r"+n+"/p/+",BASE+"r"+n+"/chat"]);
+ pub();
+ $("rt").textContent="الغرفة "+n;$("ms").textContent="";$("mnote").hidden=true;setMicBtn();
+ sys("دخلت الغرفة. اكتب رسالتك، ولتتحدث بالصوت اضغط تشغيل الميكروفون.");
+ show("room");renderPeers();
+ me.hb=setInterval(pub,20000);
+ me.timer=setInterval(()=>{const now=Date.now();Object.keys(me.members).forEach(k=>{if(now-me.members[k].seen>70000){delete me.members[k];}});renderPeers();syncCalls();},4000);
+}
+function fail(me){
+ if(room===me)room=null;
+ try{me.peer&&me.peer.destroy();}catch(e){}try{me.rc&&me.rc.end(true);}catch(e){}
+ show("err");
+}
+function pub(){
+ const me=room;if(!me||!me.rc||!me.rc.connected)return;
+ me.rc.publish(me.pt,JSON.stringify({n:name,m:micOn()}),{retain:true,qos:1});
+}
+function leave(silent){
+ const me=room;if(!me)return;room=null;
+ clearInterval(me.timer);clearInterval(me.hb);
+ try{if(me.rc){me.rc.publish(me.pt,"",{retain:true,qos:1});const c=me.rc;setTimeout(()=>{try{c.end(true);}catch(e){}},700);}}catch(e){}
+ try{me.peer&&me.peer.destroy();}catch(e){}
+ $("audios").textContent="";
+ if(micStream){micStream.getTracks().forEach(t=>t.stop());micStream=null;}
+ if(!silent){location.hash="";route();}
+}
+$("lv").onclick=()=>leave(false);
+window.addEventListener("beforeunload",()=>{const me=room;if(!me)return;try{if(me.rc){me.rc.publish(me.pt,"",{retain:true,qos:1});me.rc.end(true);}me.peer&&me.peer.destroy();}catch(e){}});
+
+/* ---------- استقبال الأسماء والرسائل ---------- */
+function onMsg(topic,payload){
+ const me=room;if(!me)return;const s=payload.toString();
+ const m=/\/p\/(\d+)$/.exec(topic);
+ if(m){
+  const k=+m[1];if(k===me.slot)return;
+  if(!s){if(me.members[k]){sys(me.members[k].n+" غادر الغرفة");delete me.members[k];}}
+  else{try{const d=JSON.parse(s);const had=!!me.members[k];
+   me.members[k]={n:String(d.n||"طالب").slice(0,24),m:!!d.m,seen:Date.now()};
+   if(!had)sys(me.members[k].n+" انضم إلى الغرفة");}catch(e){return;}}
+  renderPeers();syncCalls();return;
+ }
+ if(/\/chat$/.test(topic)){
+  let d;try{d=JSON.parse(s);}catch(e){return;}
+  if(!d||typeof d.x!=="string"||typeof d.id!=="string")return;
+  addMsg(String(d.n||"طالب").slice(0,24),d.x.slice(0,500),d.u===SID,d.id);
+ }
+}
+function renderPeers(){
+ if(!room)return;
+ const ul=$("pl");ul.textContent="";
+ const add=(n,m,v)=>{const li=document.createElement("li");const a=document.createElement("span");a.textContent=n;const b=document.createElement("span");b.textContent=(m?"🎤":"🔇")+(v?" "+v:"");li.append(a,b);ul.appendChild(li);};
+ add(name+" (أنت)",micOn(),"");
+ Object.keys(room.members).sort((a,b)=>a-b).forEach(k=>{
+  const c=room.calls[pid(room.n,k)]||room.calls[pid(room.n,+k)];
+  add(room.members[k].n,room.members[k].m,c?(c._ok?"🔊":"⏳ "+(c._ice||"")):"");
+ });
+ const n=$("mnote");
+ if(Date.now()-room.voiceFail<40000){n.hidden=false;n.textContent="⚠️ تعذّر تشغيل الصوت مع أحد الطلاب بسبب الشبكة. الدردشة الكتابية تعمل بشكل طبيعي.";}
+ else if(n.textContent.indexOf("⚠️")===0)n.hidden=true;
+}
+function sys(t){const d=document.createElement("div");d.className="m sy";d.textContent=t;$("ms").appendChild(d);$("ms").scrollTop=1e9;}
+function addMsg(who,t,me,id){
+ if(room){if(id){if(room.seen[id])return;room.seen[id]=1;}}
+ const d=document.createElement("div");d.className="m"+(me?" me":"");
+ const b=document.createElement("b");b.textContent=who;const s=document.createElement("span");s.textContent=t;
+ d.append(b,s);$("ms").appendChild(d);$("ms").scrollTop=1e9;
+}
+function sendChat(){
+ const v=$("tx").value.trim();if(!v||!room||!room.rc)return;
+ if(!room.rc.connected){sys("لا يوجد اتصال بخادم الدردشة الآن، حاول بعد لحظات.");return;}
+ const id=Math.random().toString(36).slice(2)+Date.now().toString(36);
+ room.rc.publish(BASE+"r"+room.n+"/chat",JSON.stringify({id,n:name,x:v,ts:Date.now(),u:SID}),{qos:0});
+ $("tx").value="";
+}
+$("snd").onclick=sendChat;$("tx").onkeydown=e=>{if(e.key==="Enter")sendChat();};
+
+/* ---------- الصوت (الأقل رقما يتصل بالأعلى) ---------- */
+function setupCall(call){
+ const me=room;if(!me)return;
+ me.calls[call.peer]=call;
+ call.on("stream",s=>{
+  call._ok=true;
+  let a=$("a-"+call.peer);
+  if(!a){a=document.createElement("audio");a.id="a-"+call.peer;a.autoplay=true;$("audios").appendChild(a);}
+  a.srcObject=s;
+  a.play().catch(()=>{const n=$("mnote");n.hidden=false;n.textContent="🔈 اضغط في أي مكان بالصفحة لتشغيل صوت الطلاب.";document.addEventListener("click",()=>{a.play().catch(()=>{});n.hidden=true;},{once:true});});
+  renderPeers();
+ });
+ call.on("close",()=>{if(me.calls[call.peer]===call)delete me.calls[call.peer];const a=$("a-"+call.peer);if(a)a.remove();if(room===me)renderPeers();});
+ call.on("error",()=>{});
+ setTimeout(()=>{const pc=call.peerConnection;if(pc)pc.addEventListener("iceconnectionstatechange",()=>{call._ice=pc.iceConnectionState;if(pc.iceConnectionState==="failed"&&room===me)me.voiceFail=Date.now();if(room===me)renderPeers();});},0);
+}
+function syncCalls(){
+ const me=room;if(!me||!me.peer||me.peer.destroyed)return;
+ Object.keys(me.calls).forEach(id=>{if(!me.members[slotOf(id)]){try{me.calls[id].close();}catch(e){}delete me.calls[id];}});
+ Object.keys(me.members).forEach(k=>{
+  k=+k;if(k<=me.slot)return;
+  const id=pid(me.n,k);
+  if(me.calls[id]||Date.now()-(me.callTry[id]||0)<10000)return;
+  me.callTry[id]=Date.now();
+  const call=me.peer.call(id,outStream());if(!call)return;
+  setupCall(call);
+  setTimeout(()=>{if(room===me&&me.calls[id]===call&&!call._ok){try{call.close();}catch(e){}delete me.calls[id];me.voiceFail=Date.now();renderPeers();}},15000);
+ });
+}
+function setMicBtn(){const on=micOn();$("mic").textContent=on?"🎤 كتم الميكروفون":"🎤 تشغيل الميكروفون";$("mic").className=on?"":"o";}
+$("mic").onclick=async()=>{
+ if(!room)return;
+ const n=$("mnote");
+ if(!micStream){
+  try{
+   micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}});
+   const tr=micStream.getAudioTracks()[0];n.hidden=true;
+   Object.values(room.calls).forEach(call=>{
+    const s=call.peerConnection&&call.peerConnection.getSenders().find(x=>x.track&&x.track.kind==="audio");
+    if(s)s.replaceTrack(tr);
+   });
+  }catch(e){n.hidden=false;n.textContent="تعذّر تشغيل الميكروفون. اسمح للمتصفح باستخدامه (يلزم رابط https)، أو تابع النقاش كتابة.";return;}
+ }else{const t=micStream.getAudioTracks()[0];t.enabled=!t.enabled;}
+ setMicBtn();pub();renderPeers();
+};
+
+/* ---------- البداية ---------- */
+renderLobby();
+if(typeof Peer==="undefined"||typeof mqtt==="undefined"){show("err");}else route();
+</script>
+</body>
+</html>
